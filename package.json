@@ -1,0 +1,22 @@
+{
+  "name": "yt",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "yt download",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node --watch --env-file .env src/server.js",
+    "start": "node --env-file .env src/server2.js",
+    "install-ffmpeg": "curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-i686-static.tar.xz -o ffmpeg.tar.xz && tar -xf ffmpeg.tar.xz && mv ffmpeg*/ffmpeg ./bin/ffmpeg && mv ffmpeg*/ffprop ./bin/ffprop && ./bin/ffmpeg -version",
+    "install-yt": "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod +x yt-dlp && mv yt-dlp ./bin/yt-dlp && ./bin/yt-dlp --version",
+    "postinstall": "npm run install-ffmpeg && npm run install-yt",
+    "oficial-render": "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod +x yt-dlp"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
