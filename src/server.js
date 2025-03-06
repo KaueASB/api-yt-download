@@ -7,6 +7,8 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { checkFiles, listFilesRecursively } from "./checkFiles.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
@@ -20,6 +22,12 @@ const videoFormats = ['webm', 'mp4', 'mkv'];
 const audioFormats = ['opus', 'aac', 'mp3', 'm4a', 'wav'];
 
 const downloads = new Map();
+
+app.get("/", (_req, res) => {
+  checkFiles();
+  listFilesRecursively()
+  return res.send("Servidor rodando");
+});
 
 app.get("/download", async (req, res) => {
   const { url: videoUrl, format } = req.query;
