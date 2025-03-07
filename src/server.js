@@ -36,7 +36,7 @@ app.get("/download", async (req, res) => {
     return res.status(400).json({ error: "URL do vídeo e formato são obrigatórios" });
   }
 
-  const ytdlpPath = IS_LOCAL ? 'yt-dlp' : path.join(__dirname, "..", 'bin', 'yt-dlp');
+  const ytdlpPath = IS_LOCAL ? 'yt-dlp' : '/opt/render/project/src/bin/yt-dlp';
 
   const isVideoFormat = videoFormats.includes(format);
   const isAudioFormat = audioFormats.includes(format);
