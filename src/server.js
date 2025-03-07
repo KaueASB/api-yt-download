@@ -14,7 +14,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
 
-await mkdir(path.join(__dirname, 'downloads'), { recursive: true });
+const downloadsPath = await mkdir(path.join(__dirname, '..', 'downloads'), { recursive: true });
+console.log('Caminho do diretório de downloads:', downloadsPath);
 
 const { IS_LOCAL } = process.env;
 
@@ -59,14 +60,14 @@ app.get("/download", async (req, res) => {
   const process = spawn(ytdlpPath, commandArgs);
   downloads.set(videoUrl, { progress: 0, outputPath });
 
-  console.log("process spawn", process)
+  // console.log("process spawn", process)
 
   process.stdout.on("data", (data) => {
     const progressMatch = data.toString().match(/(\d+\.\d+)%/);
 
     if (progressMatch) {
       const progress = parseFloat(progressMatch[1]);
-      console.log("progressMatch", progress)
+      // console.log("progressMatch", progress)
 
       downloads.set(videoUrl, { progress, outputPath });
     }
