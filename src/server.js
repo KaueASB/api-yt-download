@@ -68,10 +68,32 @@ app.get("/download", async (req, res) => {
     ? ['-x', '--audio-format', newFormat, '--cookies', cookiesPath, '-o', outputPath, videoUrl]
     : ['-f', `bestvideo[ext=${newFormat}]+bestaudio`, '--cookies', cookiesPath, '-o', outputPath, videoUrl];
 
+  const cookiesArgs = ['--cookies-from-browser', 'chrome', '--cookies', cookiesPath];
+
+  const processCookies = spawn(ytdlpPath, cookiesArgs);
+
+  // Captura saída de erro (stderr)
+  processCookies.stderr.on("data", (data) => {
+    console.error("Erro ao obter cookies:", data.toString());
+  });
+
+  // Captura erro caso o processo não possa ser iniciado
+  processCookies.on("error", (err) => {
+    console.error("Erro ao iniciar processo yt-dlp:", err);
+  });
+
+  // Captura quando o processo termina
+  processCookies.on("close", (code) => {
+    if (code !== 0) {
+      console.error(`Processo yt-dlp finalizado com código de erro: ${code}`);
+    } else {
+      console.log("Cookies extraídos com sucesso!");
+    }
+  });
+
+
   const process = spawn(ytdlpPath, commandArgs);
   downloads.set(videoUrl, { progress: 0, outputPath });
-
-  // console.log("process spawn", process)
 
   process.stderr.on("data", (data) => {
     console.error("Erro no download:", data.toString());
