@@ -71,9 +71,10 @@ app.get("/download", async (req, res) => {
       newFormat,
       '--cookies',
       cookiesPath,
-      '--sleep-requests', '1',  // Add delay between requests
-      '--max-sleep-interval', '5',  // Maximum sleep interval
-      '--retries', 'infinite', // Keep retrying on errors
+      '--sleep-requests', '1',
+      '--min-sleep-interval', '3',  // Minimum sleep of 3 seconds
+      '--max-sleep-interval', '5',
+      '--retries', 'infinite',
       '-o',
       outputPath,
       videoUrl
@@ -84,35 +85,13 @@ app.get("/download", async (req, res) => {
       '--cookies',
       cookiesPath,
       '--sleep-requests', '1',
+      '--min-sleep-interval', '3',  // Minimum sleep of 3 seconds
       '--max-sleep-interval', '5',
       '--retries', 'infinite',
       '-o',
       outputPath,
       videoUrl
     ];
-
-  // const cookiesArgs = ['--cookies-from-browser', 'chrome', '--cookies', cookiesPath];
-
-  // const processCookies = spawn(ytdlpPath, cookiesArgs);
-
-  // // Captura saída de erro (stderr)
-  // processCookies.stderr.on("data", (data) => {
-  //   console.error("Erro ao obter cookies:", data.toString());
-  // });
-
-  // // Captura erro caso o processo não possa ser iniciado
-  // processCookies.on("error", (err) => {
-  //   console.error("Erro ao iniciar processo yt-dlp:", err);
-  // });
-
-  // // Captura quando o processo termina
-  // processCookies.on("close", (code) => {
-  //   if (code !== 0) {
-  //     console.error(`Processo yt-dlp finalizado com código de erro: ${code}`);
-  //   } else {
-  //     console.log("Cookies extraídos com sucesso!");
-  //   }
-  // });
 
   const process = spawn(ytdlpPath, commandArgs);
   downloads.set(videoUrl, { progress: 0, outputPath });
