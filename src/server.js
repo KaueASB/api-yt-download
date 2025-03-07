@@ -54,6 +54,10 @@ async function initializeServer() {
     return res.send("Servidor rodando");
   });
 
+  app.get("/health", (_req, res) => {
+    return res.send("ok");
+  });
+
   app.get("/download", async (req, res) => {
     const { url: videoUrl, format } = req.query;
 
@@ -187,6 +191,14 @@ async function initializeServer() {
     return res.download(outputPath, (err) => {
       if (err) {
         console.error("Erro ao enviar o arquivo:", err);
+
+        fs.unlink(outputPath, (unlinkErr) => {
+          if (unlinkErr) {
+            console.error("Erro ao excluir arquivo temporário:", unlinkErr);
+          }
+          downloads.delete(url);
+        });
+
         return res.status(500).send();
       }
 
@@ -200,17 +212,17 @@ async function initializeServer() {
   });
 
   // Limpeza automática de arquivos após 1 hora
-  setInterval(() => {
-    const now = Date.now();
-    downloads.forEach(({ outputPath, progress }, url) => {
-      if (progress === 100 && now - fs.statSync(outputPath).mtimeMs > 3600000) { // 1 hora
-        fs.unlink(outputPath, (err) => {
-          if (err) console.error("Erro ao excluir arquivo antigo:", err);
-          downloads.delete(url);
-        });
-      }
-    });
-  }, 60000); // Verifica a cada minuto
+  // setInterval(() => {
+  //   const now = Date.now();
+  //   downloads.forEach(({ outputPath, progress }, url) => {
+  //     if (progress === 100 && now - fs.statSync(outputPath).mtimeMs > 3600000) { // 1 hora
+  //       fs.unlink(outputPath, (err) => {
+  //         if (err) console.error("Erro ao excluir arquivo antigo:", err);
+  //         downloads.delete(url);
+  //       });
+  //     }
+  //   });
+  // }, 60000); // Verifica a cada minuto
 
   const PORT = process.env.PORT || 3333;
   app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
