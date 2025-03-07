@@ -9,7 +9,7 @@ if (process.env.IS_LOCAL) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   basePath = path.join(__dirname, '..');
 } else {
-  basePath = '/opt/render/project';
+  basePath = '/opt/render/project/src';
 }
 
 console.log('Base Path no checkFiles:', basePath);

@@ -16,7 +16,7 @@ async function initializeServer() {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     basePath = path.join(__dirname, "..");
   } else {
-    basePath = "/opt/render/project";
+    basePath = "/opt/render/project/src";
   }
 
   const app = express();
