@@ -63,34 +63,56 @@ app.get("/download", async (req, res) => {
 
   const outputPath = path.join(basePath, 'downloads', `${isAudioFormat ? 'audio' : 'video'}-${Date.now()}.${newFormat}`);
 
-  const cookiesPath = path.join(basePath, '..', 'cookies.txt'); // Caminho onde o arquivo de cookies está localizado
+  const cookiesPath = path.join(basePath, 'cookies.txt'); // Caminho onde o arquivo de cookies está localizado
   const commandArgs = isAudioFormat
-    ? ['-x', '--audio-format', newFormat, '--cookies', cookiesPath, '-o', outputPath, videoUrl]
-    : ['-f', `bestvideo[ext=${newFormat}]+bestaudio`, '--cookies', cookiesPath, '-o', outputPath, videoUrl];
+    ? [
+      '-x',
+      '--audio-format',
+      newFormat,
+      '--cookies',
+      cookiesPath,
+      '--sleep-requests', '1',  // Add delay between requests
+      '--max-sleep-interval', '5',  // Maximum sleep interval
+      '--retries', 'infinite', // Keep retrying on errors
+      '-o',
+      outputPath,
+      videoUrl
+    ]
+    : [
+      '-f',
+      `bestvideo[ext=${newFormat}]+bestaudio`,
+      '--cookies',
+      cookiesPath,
+      '--sleep-requests', '1',
+      '--max-sleep-interval', '5',
+      '--retries', 'infinite',
+      '-o',
+      outputPath,
+      videoUrl
+    ];
 
-  const cookiesArgs = ['--cookies-from-browser', 'chrome', '--cookies', cookiesPath];
+  // const cookiesArgs = ['--cookies-from-browser', 'chrome', '--cookies', cookiesPath];
 
-  const processCookies = spawn(ytdlpPath, cookiesArgs);
+  // const processCookies = spawn(ytdlpPath, cookiesArgs);
 
-  // Captura saída de erro (stderr)
-  processCookies.stderr.on("data", (data) => {
-    console.error("Erro ao obter cookies:", data.toString());
-  });
+  // // Captura saída de erro (stderr)
+  // processCookies.stderr.on("data", (data) => {
+  //   console.error("Erro ao obter cookies:", data.toString());
+  // });
 
-  // Captura erro caso o processo não possa ser iniciado
-  processCookies.on("error", (err) => {
-    console.error("Erro ao iniciar processo yt-dlp:", err);
-  });
+  // // Captura erro caso o processo não possa ser iniciado
+  // processCookies.on("error", (err) => {
+  //   console.error("Erro ao iniciar processo yt-dlp:", err);
+  // });
 
-  // Captura quando o processo termina
-  processCookies.on("close", (code) => {
-    if (code !== 0) {
-      console.error(`Processo yt-dlp finalizado com código de erro: ${code}`);
-    } else {
-      console.log("Cookies extraídos com sucesso!");
-    }
-  });
-
+  // // Captura quando o processo termina
+  // processCookies.on("close", (code) => {
+  //   if (code !== 0) {
+  //     console.error(`Processo yt-dlp finalizado com código de erro: ${code}`);
+  //   } else {
+  //     console.log("Cookies extraídos com sucesso!");
+  //   }
+  // });
 
   const process = spawn(ytdlpPath, commandArgs);
   downloads.set(videoUrl, { progress: 0, outputPath });
