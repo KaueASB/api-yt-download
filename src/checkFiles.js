@@ -57,7 +57,7 @@ export const checkFiles = () => {
   });
 };
 
-export function listFilesRecursively(dir, ignoreDirs = new Set([".git", "node_modules"])) {
+export function listFilesRecursively(dir = basePath, ignoreDirs = new Set([".git", "node_modules"])) {
   try {
     const files = fs.readdirSync(dir);
 
@@ -80,5 +80,5 @@ export function listFilesRecursively(dir, ignoreDirs = new Set([".git", "node_mo
 }
 
 // Executando a função no diretório do projeto
-checkFiles();
-listFilesRecursively(basePath);
+// checkFiles();
+// listFilesRecursively(basePath);
