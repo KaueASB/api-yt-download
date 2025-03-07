@@ -1,8 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { exec } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const basePath = '/opt/render/project/src'; // Caminho padrão no Render
+let basePath = ''
+
+if (process.env.IS_LOCAL) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  basePath = path.join(__dirname, '..');
+} else {
+  basePath = '/opt/render/project/src';
+}
+
+console.log('Base Path:', basePath);
 
 export const checkFiles = () => {
   console.log('Verificando estrutura de arquivos no Render:');
@@ -25,47 +35,50 @@ export const checkFiles = () => {
   binaries.forEach(bin => {
     const fullPath = path.join(basePath, bin);
 
-    if (fs.existsSync(fullPath)) {
-      console.log(`✅ Binário encontrado: ${fullPath}`);
+    // if (fs.existsSync(fullPath)) {
+    //   console.log(`✅ Binário encontrado: ${fullPath}`);
 
-      exec('./bin/yt-dlp --version', (error, stdout, stderr) => {
-        if (error) {
-          console.error(`Erro ao executar yt-dlp: ${error.message}`);
-          return;
-        }
+    //   exec('./bin/yt-dlp --version', (error, stdout, stderr) => {
+    //     if (error) {
+    //       console.error(`Erro ao executar yt-dlp: ${error.message}`);
+    //       return;
+    //     }
 
-        if (stderr) {
-          console.error(`yt-dlp stderr: ${stderr}`);
-          return;
-        }
+    //     if (stderr) {
+    //       console.error(`yt-dlp stderr: ${stderr}`);
+    //       return;
+    //     }
 
-        console.log(`yt-dlp versão: ${stdout}`);
-      })
-    } else {
-      console.log(`❌ Binário não encontrado: ${fullPath}`);
-    }
+    //     console.log(`yt-dlp versão: ${stdout}`);
+    //   })
+    // } else {
+    //   console.log(`❌ Binário não encontrado: ${fullPath}`);
+    // }
   });
 };
 
-export const listFilesRecursively = (depth = 0) => {
+export function listFilesRecursively(dir, ignoreDirs = new Set([".git", "node_modules"])) {
   try {
-    const files = fs.readdirSync(basePath);
+    const files = fs.readdirSync(dir);
 
-    files.forEach(file => {
-      const fullPath = path.join(basePath, file);
-      const stats = fs.statSync(fullPath);
-      const prefix = '  '.repeat(depth); // Indenta para melhor visualização
+    for (const file of files) {
+      const fullPath = path.join(dir, file);
+      const stat = fs.statSync(fullPath);
 
-      if (stats.isDirectory()) {
-        console.log(`${prefix}📂 ${file}/`); // Indica que é um diretório
-        listFilesRecursively(fullPath, depth + 1); // Chama recursivamente para subdiretórios
+      if (stat.isDirectory()) {
+        if (!ignoreDirs.has(file)) {
+          console.log(`📂 ${fullPath}`);
+          listFilesRecursively(fullPath, ignoreDirs); // Recursão segura
+        }
       } else {
-        console.log(`${prefix}📄 ${file}`); // Indica que é um arquivo
+        console.log(`📄 ${fullPath}`);
       }
-    });
-  } catch (err) {
-    console.error(`Erro ao listar arquivos em ${basePath}: ${err.message}`);
+    }
+  } catch (error) {
+    console.error(`Erro ao listar arquivos em ${dir}: ${error.message}`);
   }
-};
+}
 
-console.log('📁 Estrutura de diretórios e arquivos:');
+// Executando a função no diretório do projeto
+checkFiles();
+listFilesRecursively(basePath);
