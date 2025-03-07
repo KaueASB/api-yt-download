@@ -23,7 +23,7 @@ const audioFormats = ['opus', 'aac', 'mp3', 'm4a', 'wav'];
 
 const downloads = new Map();
 
-app.get("/", (_req, res) => {
+app.get("/check", (_req, res) => {
   checkFiles();
   listFilesRecursively()
   return res.send("Servidor rodando");
