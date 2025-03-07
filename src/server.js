@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import fs from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -38,6 +38,8 @@ app.get("/download", async (req, res) => {
 
   // const ytdlpPath = IS_LOCAL ? 'yt-dlp' : '/opt/render/project/src/bin/yt-dlp';
   const ytdlpPath = IS_LOCAL ? 'yt-dlp' : path.join("/opt/render/project/src", 'bin', 'yt-dlp');
+  !IS_LOCAL ? execSync(`chmod +x ${ytdlpPath}`) : null;
+
   console.log('YTDLP Path:', ytdlpPath);
 
   const isVideoFormat = videoFormats.includes(format);
@@ -57,7 +59,7 @@ app.get("/download", async (req, res) => {
   const process = spawn(ytdlpPath, commandArgs);
   downloads.set(videoUrl, { progress: 0, outputPath });
 
-  console.log("process", process)
+  // console.log("process", process)
 
   process.stdout.on("data", (data) => {
     const progressMatch = data.toString().match(/(\d+\.\d+)%/);
