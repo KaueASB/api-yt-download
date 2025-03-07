@@ -13,7 +13,7 @@ let basePath = ''
 
 if (process.env.IS_LOCAL) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  basePath = path.join(__dirname, '..');
+  basePath = path.join(__dirname);
 } else {
   basePath = '/opt/render/project/src';
 }
@@ -62,9 +62,11 @@ app.get("/download", async (req, res) => {
   const newFormat = isVideoFormat && videoUrl.includes("m3u8") ? "mp4" : format
 
   const outputPath = path.join(basePath, 'downloads', `${isAudioFormat ? 'audio' : 'video'}-${Date.now()}.${newFormat}`);
+
+  const cookiesPath = path.join(basePath, '..', 'cookies.txt'); // Caminho onde o arquivo de cookies está localizado
   const commandArgs = isAudioFormat
-    ? ['-x', '--audio-format', newFormat, '-o', outputPath, videoUrl]
-    : ['-f', `bestvideo[ext=${newFormat}]+bestaudio`, '-o', outputPath, videoUrl];
+    ? ['-x', '--audio-format', newFormat, '--cookies', cookiesPath, '-o', outputPath, videoUrl]
+    : ['-f', `bestvideo[ext=${newFormat}]+bestaudio`, '--cookies', cookiesPath, '-o', outputPath, videoUrl];
 
   const process = spawn(ytdlpPath, commandArgs);
   downloads.set(videoUrl, { progress: 0, outputPath });
