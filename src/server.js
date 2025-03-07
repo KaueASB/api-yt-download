@@ -9,13 +9,22 @@ import { fileURLToPath } from 'node:url';
 
 import { checkFiles, listFilesRecursively } from "./checkFiles.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let basePath = ''
+
+if (process.env.IS_LOCAL) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  basePath = path.join(__dirname, '..');
+} else {
+  basePath = '/opt/render/project/src';
+}
 
 const app = express();
 app.use(cors());
 
-const downloadsPath = await mkdir(path.join(__dirname, '..', 'downloads'), { recursive: true });
+const downloadsPath = await mkdir(path.join(basePath, 'downloads'), { recursive: true });
 console.log('Caminho do diretório de downloads:', downloadsPath);
+
+console.log('basePath', basePath);
 
 const { IS_LOCAL } = process.env;
 
@@ -38,7 +47,7 @@ app.get("/download", async (req, res) => {
   }
 
   // const ytdlpPath = IS_LOCAL ? 'yt-dlp' : path.join("/opt/render/project/src", 'bin', 'yt-dlp');
-  const ytdlpPath = IS_LOCAL ? 'yt-dlp' : path.join(__dirname, '..', 'bin', 'yt-dlp');
+  const ytdlpPath = IS_LOCAL ? 'yt-dlp' : path.join(basePath, 'bin', 'yt-dlp');
   !IS_LOCAL ? execSync(`chmod +x ${ytdlpPath}`) : null;
 
   console.log('YTDLP Path:', ytdlpPath);
@@ -52,7 +61,7 @@ app.get("/download", async (req, res) => {
 
   const newFormat = isVideoFormat && videoUrl.includes("m3u8") ? "mp4" : format
 
-  const outputPath = path.join(__dirname, 'downloads', `${isAudioFormat ? 'audio' : 'video'}-${Date.now()}.${newFormat}`);
+  const outputPath = path.join(basePath, 'downloads', `${isAudioFormat ? 'audio' : 'video'}-${Date.now()}.${newFormat}`);
   const commandArgs = isAudioFormat
     ? ['-x', '--audio-format', newFormat, '-o', outputPath, videoUrl]
     : ['-f', `bestvideo[ext=${newFormat}]+bestaudio`, '-o', outputPath, videoUrl];
