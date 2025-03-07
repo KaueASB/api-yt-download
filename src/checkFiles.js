@@ -9,10 +9,10 @@ if (process.env.IS_LOCAL) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   basePath = path.join(__dirname, '..');
 } else {
-  basePath = '/opt/render/project/src';
+  basePath = '/opt/render/project';
 }
 
-console.log('Base Path:', basePath);
+console.log('Base Path no checkFiles:', basePath);
 
 export const checkFiles = () => {
   console.log('Verificando estrutura de arquivos no Render:');
