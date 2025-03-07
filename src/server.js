@@ -36,7 +36,9 @@ app.get("/download", async (req, res) => {
     return res.status(400).json({ error: "URL do vídeo e formato são obrigatórios" });
   }
 
-  const ytdlpPath = IS_LOCAL ? 'yt-dlp' : '/opt/render/project/src/bin/yt-dlp';
+  // const ytdlpPath = IS_LOCAL ? 'yt-dlp' : '/opt/render/project/src/bin/yt-dlp';
+  const ytdlpPath = IS_LOCAL ? 'yt-dlp' : path.join("/opt/render/project/src", 'bin', 'yt-dlp');
+  console.log('YTDLP Path:', ytdlpPath);
 
   const isVideoFormat = videoFormats.includes(format);
   const isAudioFormat = audioFormats.includes(format);
@@ -54,6 +56,8 @@ app.get("/download", async (req, res) => {
 
   const process = spawn(ytdlpPath, commandArgs);
   downloads.set(videoUrl, { progress: 0, outputPath });
+
+  console.log("process", process)
 
   process.stdout.on("data", (data) => {
     const progressMatch = data.toString().match(/(\d+\.\d+)%/);
