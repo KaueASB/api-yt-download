@@ -35,25 +35,25 @@ export const checkFiles = () => {
   binaries.forEach(bin => {
     const fullPath = path.join(basePath, bin);
 
-    // if (fs.existsSync(fullPath)) {
-    //   console.log(`✅ Binário encontrado: ${fullPath}`);
+    if (fs.existsSync(fullPath)) {
+      console.log(`✅ Binário encontrado: ${fullPath}`);
 
-    //   exec('./bin/yt-dlp --version', (error, stdout, stderr) => {
-    //     if (error) {
-    //       console.error(`Erro ao executar yt-dlp: ${error.message}`);
-    //       return;
-    //     }
+      exec('./bin/yt-dlp --version', (error, stdout, stderr) => {
+        if (error) {
+          console.error(`Erro ao executar yt-dlp: ${error.message}`);
+          return;
+        }
 
-    //     if (stderr) {
-    //       console.error(`yt-dlp stderr: ${stderr}`);
-    //       return;
-    //     }
+        if (stderr) {
+          console.error(`yt-dlp stderr: ${stderr}`);
+          return;
+        }
 
-    //     console.log(`yt-dlp versão: ${stdout}`);
-    //   })
-    // } else {
-    //   console.log(`❌ Binário não encontrado: ${fullPath}`);
-    // }
+        console.log(`yt-dlp versão: ${stdout}`);
+      })
+    } else {
+      console.log(`❌ Binário não encontrado: ${fullPath}`);
+    }
   });
 };
 
