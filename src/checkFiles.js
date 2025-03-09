@@ -35,7 +35,7 @@ export const checkFiles = () => {
   const execBinaries = {
     'bin/ffmpeg': 'ffmpeg -version',
     'bin/ffprobe': 'ffprobe -version',
-    'bin/yt-dlp': 'yt-dlp --version'
+    'bin/yt-dlp': './bin/yt-dlp --version'
   };
 
   binaries.forEach(bin => {
