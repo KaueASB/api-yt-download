@@ -17,7 +17,7 @@ console.log('Base Path no checkFiles:', basePath);
 export const checkFiles = () => {
   console.log('Verificando estrutura de arquivos no Render:');
 
-  const directories = ['bin', 'ffmpeg-7.0.2-i686-static', 'src/downloads'];
+  const directories = ['bin', 'ffmpeg-7.0.2-i686-static'];
 
   directories.forEach(dir => {
     const fullPath = path.join(basePath, dir);
@@ -32,13 +32,19 @@ export const checkFiles = () => {
   // Verificar se os binários do ffmpeg e yt-dlp estão no lugar certo
   const binaries = ['bin/ffmpeg', 'bin/ffprobe', 'bin/yt-dlp'];
 
+  const execBinaries = {
+    'bin/ffmpeg': 'ffmpeg -version',
+    'bin/ffprobe': 'ffprobe -version',
+    'bin/yt-dlp': 'yt-dlp --version'
+  };
+
   binaries.forEach(bin => {
     const fullPath = path.join(basePath, bin);
 
     if (fs.existsSync(fullPath)) {
       console.log(`✅ Binário encontrado: ${fullPath}`);
 
-      exec('./bin/yt-dlp --version', (error, stdout, stderr) => {
+      exec(execBinaries[bin], (error, stdout, stderr) => {
         if (error) {
           console.error(`Erro ao executar yt-dlp: ${error.message}`);
           return;
