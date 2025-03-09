@@ -46,16 +46,16 @@ export const checkFiles = () => {
 
       exec(execBinaries[bin], (error, stdout, stderr) => {
         if (error) {
-          console.error(`Erro ao executar yt-dlp: ${error.message}`);
+          console.error(`Erro ao executar ${execBinaries[bin]}: ${error.message}`);
           return;
         }
 
         if (stderr) {
-          console.error(`yt-dlp stderr: ${stderr}`);
+          console.error(`${execBinaries[bin]} stderr: ${stderr}`);
           return;
         }
 
-        console.log(`yt-dlp versão: ${stdout}`);
+        console.log(`${execBinaries[bin]}: ${stdout}`);
       })
     } else {
       console.log(`❌ Binário não encontrado: ${fullPath}`);
