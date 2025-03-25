@@ -33,10 +33,10 @@ export const downloadController = {
       }
 
       const result = downloadService.startDownload(videoUrl, format);
-      res.json(result);
+      return res.json(result);
     } catch (error) {
       console.error('Error starting download:', error);
-      res.status(400).json({ error: error.message });
+      return res.status(400).json({ error: error.message });
     }
   },
 
@@ -76,7 +76,7 @@ export const downloadController = {
       });
     } catch (error) {
       console.error('Error getting progress:', error);
-      res.status(500).json({ error: 'Failed to get download progress' });
+      return res.status(500).json({ error: 'Failed to get download progress' });
     }
   },
 
@@ -88,19 +88,19 @@ export const downloadController = {
         return res.status(404).json({ error: 'File not found' });
       }
 
-      const filePath = downloadService.getDownloadFile(url);
+      const filePath = await downloadService.getDownloadFile(url);
 
-      return res.download(filePath, (err) => {
+      return res.download(filePath, async (err) => {
         if (err) {
           console.error('Error sending file:', err);
           return res.status(500).send();
         }
 
-        downloadService.removeDownload(url);
+        await downloadService.removeDownload(url);
       });
     } catch (error) {
       console.error('Error getting file:', error);
-      res.status(404).json({ error: 'File not found' });
+      return res.status(404).json({ error: 'File not found' });
     }
   }
 }; 

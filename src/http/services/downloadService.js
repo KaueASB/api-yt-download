@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { unlink } from 'node:fs/promises';
 import { config } from '../../config/config.js';
 
 class DownloadService {
@@ -108,7 +109,7 @@ class DownloadService {
     return download.progress;
   }
 
-  getDownloadFile(videoUrl) {
+  async getDownloadFile(videoUrl) {
     const download = this.downloads.get(videoUrl);
     if (!download) {
       throw new Error('File not found');
@@ -116,8 +117,17 @@ class DownloadService {
     return download.outputPath;
   }
 
-  removeDownload(videoUrl) {
-    this.downloads.delete(videoUrl);
+  async removeDownload(videoUrl) {
+    try {
+      const download = this.downloads.get(videoUrl);
+      if (download) {
+        await unlink(download.outputPath);
+        this.downloads.delete(videoUrl);
+      }
+    } catch (error) {
+      console.error('Error removing download file:', error);
+      this.downloads.delete(videoUrl);
+    }
   }
 }
 

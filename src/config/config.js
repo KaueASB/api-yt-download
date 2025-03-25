@@ -39,5 +39,11 @@ console.log('Configuration:', {
   port: config.port,
   downloadsPath: config.downloadsPath,
   cookiesPath: config.cookiesPath,
-  ytdlpPath: config.ytdlpPath
+  ytdlpPath: config.ytdlpPath,
+  downloadOptions: {
+    sleepRequests: config.downloadOptions.sleepRequests,
+    minSleepInterval: config.downloadOptions.minSleepInterval,
+    maxSleepInterval: config.downloadOptions.maxSleepInterval,
+    retries: config.downloadOptions.retries
+  }
 }); 
