@@ -85,6 +85,33 @@ export function listFilesRecursively(dir = basePath, ignoreDirs = new Set([".git
   }
 }
 
-// Executando a função no diretório do projeto
-// checkFiles();
-// listFilesRecursively(basePath);
+export function parseFormats(output) {
+  const lines = output.split('\n').slice(4);
+
+  const formats = [];
+  const regex = /^(\S+)\s+(\S+)\s+(\d+x\d+|audio only)\s*(\d+)?\s*(\S+(?:KiB|MiB|k))?\s*(\S+)?\s*(\S+)?\s*\|\s*(\S+)?\s*(\S+)?\s*(\S+)?\s*(\S+)?\s*\|\s*(\S+?)\s+(\d+k)?\s*(\d+k)?\s*(.*)?$/;
+
+  for (const line of lines) {
+    const match = line.match(regex);
+    if (match) {
+      formats.push({
+        id: match[1],
+        ext: match[2],
+        resolution: match[3] || null,
+        fps: match[4] || null,
+        ch: match[5] || null,
+        filesize: match[6] || null,
+        tbr: match[7] || null,
+        protocol: match[8] || null,
+        vcodec: match[9] || null,
+        vbr: match[10] || null,
+        acodec: match[11] || null,
+        abr: match[12] || null,
+        asr: match[13] || null,
+        more_info: match[14] || null,
+      });
+    }
+  }
+
+  return formats;
+}
