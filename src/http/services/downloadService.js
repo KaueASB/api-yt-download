@@ -10,7 +10,12 @@ class DownloadService {
 
   async getFormats(videoUrl) {
     return new Promise((resolve, reject) => {
-      const ytDlpProcess = spawn(config.ytdlpPath, ['-F', videoUrl]);
+      const ytDlpProcess = spawn(config.ytdlpPath, [
+        '--cookies',
+        config.cookiesPath,
+        '-F',
+        videoUrl
+      ]);
       let output = '';
 
       ytDlpProcess.stdout.on('data', (data) => {
