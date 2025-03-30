@@ -40,6 +40,26 @@ export const downloadController = {
     }
   },
 
+  async startDownloadWithFormatCode(req, res) {
+    try {
+      const { url: videoUrl, code: formatCode } = req.query;
+
+      if (!videoUrl || !formatCode) {
+        return res.status(400).json({ error: 'Video URL and format code are required' });
+      }
+
+      if (!videoUrl.startsWith('http')) {
+        return res.status(400).json({ error: 'Invalid URL' });
+      }
+
+      const result = await downloadService.downloadWithFormatCode(videoUrl, formatCode);
+      return res.json(result);
+    } catch (error) {
+      console.error('Error starting download with format code:', error);
+      return res.status(400).json({ error: error.message });
+    }
+  },
+
   getProgress(req, res) {
     try {
       const { url } = req.query;

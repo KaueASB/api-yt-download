@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { unlink } from 'node:fs/promises';
 import { config } from '../../config/config.js';
+import { parseFormats } from '../../utils/formatParser.js';
 
 class DownloadService {
   constructor() {
@@ -35,6 +36,56 @@ class DownloadService {
         resolve(output);
       });
     });
+  }
+
+  async downloadWithFormatCode(videoUrl, formatCode) {
+    if (!formatCode) {
+      throw new Error('Format code is required');
+    }
+
+    // Get the formats first to determine the extension
+    return this.getFormats(videoUrl)
+      .then(output => {
+        const formats = parseFormats(output);
+
+        // Find the selected format
+        const selectedFormat = formats.find(format => format.code === formatCode);
+
+        if (!selectedFormat) {
+          throw new Error('Format code not found');
+        }
+
+        const extension = selectedFormat.extension;
+        const outputPath = path.join(
+          config.downloadsPath,
+          `download-${Date.now()}.${extension}`
+        );
+
+        const commandArgs = [
+          '--cookies',
+          config.cookiesPath,
+          '--sleep-requests',
+          config.downloadOptions.sleepRequests,
+          '--min-sleep-interval',
+          config.downloadOptions.minSleepInterval,
+          '--max-sleep-interval',
+          config.downloadOptions.maxSleepInterval,
+          '--retries',
+          config.downloadOptions.retries,
+          '-f',
+          formatCode,
+          '-o',
+          outputPath,
+          videoUrl
+        ];
+
+        const downloadProcess = spawn(config.ytdlpPath, commandArgs);
+
+        this.setupDownloadProcess(downloadProcess, videoUrl, outputPath);
+        this.downloads.set(videoUrl, { progress: 0, outputPath, process: downloadProcess });
+
+        return { message: 'Download started', url: videoUrl };
+      });
   }
 
   startDownload(videoUrl, format) {

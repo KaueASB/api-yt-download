@@ -5,6 +5,7 @@ const router = express.Router();
 
 router.get('/formats', downloadController.getFormats);
 router.get('/download', downloadController.startDownload);
+router.get('/download-with-code', downloadController.startDownloadWithFormatCode);
 router.get('/progress', downloadController.getProgress);
 router.get('/file', downloadController.getFile);
 

@@ -40,10 +40,14 @@ export function parseFormats(output) {
         resolution = 'audio only';
       } else {
         // Try to find resolution pattern (e.g., 1920x1080, 1280x720)
-        const resMatch = rest.match(/(\d+x\d+)\s+(\d+)/);
+        const resMatch = rest.match(/(\d+x\d+)/);
         if (resMatch) {
           resolution = resMatch[1];
-          fps = parseInt(resMatch[2]); // FPS é o número que vem logo após a resolução
+          // Try to find FPS separately
+          const fpsMatch = rest.match(/(\d+x\d+)\s+(\d+)/);
+          if (fpsMatch) {
+            fps = parseInt(fpsMatch[2]);
+          }
         }
       }
 
