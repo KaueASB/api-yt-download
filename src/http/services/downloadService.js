@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { unlink } from 'node:fs/promises';
 import { config } from '../../config/config.js';
@@ -11,28 +12,36 @@ class DownloadService {
 
   async getFormats(videoUrl) {
     return new Promise((resolve, reject) => {
-      const ytDlpProcess = spawn(config.ytdlpPath, [
+      const ytDlpProcess = spawn('yt-dlp', [
         '--cookies',
         config.cookiesPath,
         '-F',
         videoUrl
       ]);
       let output = '';
+      let errorOutput = '';
 
       ytDlpProcess.stdout.on('data', (data) => {
         output += data.toString();
       });
 
       ytDlpProcess.stderr.on('data', (data) => {
-        console.error(`Error getting formats: ${data}`);
-        reject(new Error('Failed to get available formats'));
+        errorOutput += data.toString();
       });
 
       ytDlpProcess.on('close', (code) => {
         if (code !== 0) {
-          reject(new Error('Failed to get available formats'));
+          console.error(`Error getting formats: ${errorOutput}`);
+
+          reject(
+            new Error(
+              errorOutput || 'Failed to get available formats'
+            )
+          );
+
           return;
         }
+
         resolve(output);
       });
     });
@@ -55,11 +64,20 @@ class DownloadService {
           throw new Error('Format code not found');
         }
 
-        const extension = selectedFormat.extension;
+        const extension = selectedFormat.resolution === 'audio only'
+          ? selectedFormat.extension
+          : 'mp4';
+
         const outputPath = path.join(
           config.downloadsPath,
-          `download-${Date.now()}.${extension}`
+          `download-${Date.now()}`
         );
+
+        const isAudioOnly = selectedFormat.resolution === 'audio only';
+
+        const selectedFormatCode = isAudioOnly
+          ? formatCode
+          : `${formatCode}+bestaudio/best`;
 
         const commandArgs = [
           '--cookies',
@@ -72,19 +90,32 @@ class DownloadService {
           config.downloadOptions.maxSleepInterval,
           '--retries',
           config.downloadOptions.retries,
+          '--print',
+          'after_move:FILEPATH:%(filepath)s',
+          '--progress',
+          '--newline',
+          '--no-part',
+          '--merge-output-format',
+          'mp4',
           '-f',
-          formatCode,
+          selectedFormatCode,
           '-o',
           outputPath,
           videoUrl
         ];
 
-        const downloadProcess = spawn(config.ytdlpPath, commandArgs);
+        const downloadProcess = spawn('yt-dlp', commandArgs);
+        const jobId = crypto.randomUUID();
 
-        this.setupDownloadProcess(downloadProcess, videoUrl, outputPath);
-        this.downloads.set(videoUrl, { progress: 0, outputPath, process: downloadProcess });
+        this.setupDownloadProcess(downloadProcess, jobId, outputPath);
+        this.downloads.set(jobId, {
+          progress: 0,
+          outputPath,
+          process: downloadProcess,
+          url: videoUrl
+        });
 
-        return { message: 'Download started', url: videoUrl };
+        return { message: 'Download started', jobId };
       });
   }
 
@@ -96,19 +127,27 @@ class DownloadService {
       throw new Error('Unsupported format');
     }
 
-    const newFormat = isVideoFormat && videoUrl.includes('m3u8') ? 'mp4' : format;
+    const newFormat = isVideoFormat
+      ? 'mp4'
+      : format;
     const outputPath = path.join(
       config.downloadsPath,
-      `${isAudioFormat ? 'audio' : 'video'}-${Date.now()}.${newFormat}`
+      `${isAudioFormat ? 'audio' : 'video'}-${Date.now()}`
     );
 
     const commandArgs = this.buildCommandArgs(isAudioFormat, newFormat, outputPath, videoUrl);
-    const downloadProcess = spawn(config.ytdlpPath, commandArgs);
+    const downloadProcess = spawn('yt-dlp', commandArgs);
+    const jobId = crypto.randomUUID();
 
-    this.setupDownloadProcess(downloadProcess, videoUrl, outputPath);
-    this.downloads.set(videoUrl, { progress: 0, outputPath, process: downloadProcess });
+    this.setupDownloadProcess(downloadProcess, jobId, outputPath);
+    this.downloads.set(jobId, {
+      progress: 0,
+      outputPath,
+      process: downloadProcess,
+      url: videoUrl
+    });
 
-    return { message: 'Download started', url: videoUrl };
+    return { message: 'Download started', jobId };
   }
 
   buildCommandArgs(isAudioFormat, format, outputPath, videoUrl) {
@@ -123,68 +162,135 @@ class DownloadService {
       config.downloadOptions.maxSleepInterval,
       '--retries',
       config.downloadOptions.retries,
+      '--print',
+      'after_move:FILEPATH:%(filepath)s',
       '-o',
       outputPath,
       videoUrl
     ];
 
     return isAudioFormat
-      ? ['-x', '--audio-format', format, ...baseArgs]
-      : ['-f', `bestvideo[ext=${format}]+bestaudio`, ...baseArgs];
+      ? ['-x', '--audio-format', format, '--progress', '--newline', '--no-part', ...baseArgs]
+      : [
+        '-f',
+        'bestvideo+bestaudio/best',
+        '--merge-output-format',
+        'mp4',
+        '--progress',
+        '--newline',
+        '--no-part',
+        ...baseArgs
+      ];
   }
 
-  setupDownloadProcess(process, videoUrl, outputPath) {
-    process.stderr.on('data', (data) => {
-      console.error('Download error:', data.toString());
-    });
+  setupDownloadProcess(process, jobId, outputPath) {
+    let buffer = '';
+    let errorBuffer = '';
 
-    process.stdout.on('data', (data) => {
-      const progressMatch = data.toString().match(/(\d+\.\d+)%/);
-      if (progressMatch) {
-        const progress = parseFloat(progressMatch[1]);
-        this.downloads.set(videoUrl, { progress, outputPath, process });
+    const handleProgress = (data) => {
+      const text = data.toString();
+
+      const filepathMatch = text.match(/FILEPATH:(.+)/);
+
+      if (filepathMatch) {
+        const finalPath = filepathMatch[1].trim();
+
+        const download = this.downloads.get(jobId);
+
+        if (download) {
+          this.downloads.set(jobId, {
+            ...download,
+            outputPath: finalPath
+          });
+        }
       }
+
+      const progressMatch = text.match(/(\d+(?:\.\d+)?)%/);
+
+      if (progressMatch) {
+        const value = parseFloat(progressMatch[1]);
+
+        const download = this.downloads.get(jobId);
+
+        if (download) {
+          this.downloads.set(jobId, {
+            ...download,
+            progress: value
+          });
+        }
+      }
+    };
+
+    process.stdout.on('data', handleProgress);
+    process.stderr.on('data', (data) => {
+      errorBuffer += data.toString();
+      handleProgress(data);
     });
 
     process.on('close', (code) => {
+      const download = this.downloads.get(jobId);
+      if (!download) return;
+
       if (code !== 0) {
-        this.downloads.delete(videoUrl);
         console.error('Download failed with yt-dlp');
-      } else {
-        console.log('Download completed');
-        this.downloads.set(videoUrl, { progress: 100, outputPath, process: null });
+        console.error(errorBuffer);
+
+        this.downloads.set(jobId, {
+          ...download,
+          process: null,
+          error: errorBuffer || 'Unknown yt-dlp error',
+          progress: -1
+        });
+
+        return;
       }
+
+      this.downloads.set(jobId, {
+        ...download,
+        progress: 100,
+        process: null
+      });
+
+      console.log('Download completed');
     });
   }
 
-  getDownloadProgress(videoUrl) {
-    const download = this.downloads.get(videoUrl);
+  getDownloadProgress(jobId) {
+    const download = this.downloads.get(jobId);
     if (!download) {
       throw new Error('Download not found');
     }
+    if (download.error) {
+      throw new Error(download.error);
+    }
+
     return download.progress;
   }
 
-  async getDownloadFile(videoUrl) {
-    const download = this.downloads.get(videoUrl);
+  async getDownloadFile(jobId) {
+    const download = this.downloads.get(jobId);
     if (!download) {
       throw new Error('File not found');
     }
     return download.outputPath;
   }
 
-  async removeDownload(videoUrl) {
+  async removeDownload(jobId) {
+    const download = this.downloads.get(jobId);
+
+    if (!download) return;
+
     try {
-      const download = this.downloads.get(videoUrl);
-      if (download) {
-        await unlink(download.outputPath);
-        this.downloads.delete(videoUrl);
-      }
+      await unlink(download.outputPath);
     } catch (error) {
-      console.error('Error removing download file:', error);
-      this.downloads.delete(videoUrl);
+      console.warn(
+        'Could not remove file:',
+        download.outputPath
+      );
     }
+
+    this.downloads.delete(jobId);
   }
 }
 
-export const downloadService = new DownloadService(); 
+export const downloadService = new DownloadService();

@@ -62,53 +62,37 @@ export const downloadController = {
 
   getProgress(req, res) {
     try {
-      const { url } = req.query;
+      const { jobId } = req.query;
 
-      if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
+      if (!jobId) {
+        return res.status(400).json({
+          error: 'Job ID is required'
+        });
       }
 
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+      const progress = downloadService.getDownloadProgress(jobId);
 
-      const sendProgress = () => {
-        try {
-          const progress = downloadService.getDownloadProgress(url);
-          res.write(`data: ${JSON.stringify({ progress })}\n\n`);
-
-          if (progress === 100) {
-            clearInterval(interval);
-            res.end();
-          }
-        } catch (error) {
-          res.write(`data: ${JSON.stringify({ error: 'Download not found' })}\n\n`);
-          clearInterval(interval);
-          res.end();
-        }
-      };
-
-      const interval = setInterval(sendProgress, 1000);
-
-      req.on('close', () => {
-        clearInterval(interval);
-        res.end();
+      return res.json({
+        progress
       });
     } catch (error) {
       console.error('Error getting progress:', error);
-      return res.status(500).json({ error: 'Failed to get download progress' });
+
+      return res.status(404).json({
+        error: 'Download not found'
+      });
     }
   },
 
   async getFile(req, res) {
     try {
-      const { url } = req.query;
+      const { jobId } = req.query;
 
-      if (!url) {
-        return res.status(404).json({ error: 'File not found' });
+      if (!jobId) {
+        return res.status(400).json({ error: 'Job ID is required' });
       }
 
-      const filePath = await downloadService.getDownloadFile(url);
+      const filePath = await downloadService.getDownloadFile(jobId);
 
       return res.download(filePath, async (err) => {
         if (err) {
@@ -116,11 +100,11 @@ export const downloadController = {
           return res.status(500).send();
         }
 
-        await downloadService.removeDownload(url);
+        await downloadService.removeDownload(jobId);
       });
     } catch (error) {
       console.error('Error getting file:', error);
       return res.status(404).json({ error: 'File not found' });
     }
   }
-}; 
+};
