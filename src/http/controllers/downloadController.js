@@ -11,8 +11,8 @@ export const downloadController = {
         return res.status(400).json({ error: 'Video URL is required' });
       }
 
-      const output = await downloadService.getFormats(videoUrl);
-      const formats = parseFormats(output);
+      const info = await downloadService.getVideoInfo(videoUrl);
+      const formats = parseFormats(info);
       res.json({ formats });
     } catch (error) {
       console.error('Error getting formats:', error);
@@ -32,7 +32,7 @@ export const downloadController = {
         return res.status(400).json({ error: 'Invalid URL' });
       }
 
-      const result = downloadService.startDownload(videoUrl, format);
+      const result = await downloadService.startDownload(videoUrl, format);
       return res.json(result);
     } catch (error) {
       console.error('Error starting download:', error);
@@ -60,39 +60,29 @@ export const downloadController = {
     }
   },
 
-  getProgress(req, res) {
+  async getProgress(req, res) {
     try {
-      const { url } = req.query;
+      const { jobId } = req.query;
 
-      if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
+      if (!jobId) {
+        return res.status(400).json({
+          error: 'Job ID is required'
+        });
       }
 
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+      const job = await downloadService.getJob(jobId);
 
-      const sendProgress = () => {
-        try {
-          const progress = downloadService.getDownloadProgress(url);
-          res.write(`data: ${JSON.stringify({ progress })}\n\n`);
+      if (!job) {
+        return res.status(404).json({ error: 'Download not found' });
+      }
 
-          if (progress === 100) {
-            clearInterval(interval);
-            res.end();
-          }
-        } catch (error) {
-          res.write(`data: ${JSON.stringify({ error: 'Download not found' })}\n\n`);
-          clearInterval(interval);
-          res.end();
-        }
-      };
+      if (job.status === 'error') {
+        return res.status(500).json({ progress: -1, error: job.error });
+      }
 
-      const interval = setInterval(sendProgress, 1000);
-
-      req.on('close', () => {
-        clearInterval(interval);
-        res.end();
+      return res.json({
+        progress: job.progress,
+        status: job.status
       });
     } catch (error) {
       console.error('Error getting progress:', error);
@@ -102,25 +92,28 @@ export const downloadController = {
 
   async getFile(req, res) {
     try {
-      const { url } = req.query;
+      const { jobId } = req.query;
 
-      if (!url) {
+      if (!jobId) {
+        return res.status(400).json({ error: 'Job ID is required' });
+      }
+
+      const job = await downloadService.getJob(jobId);
+
+      if (!job) {
         return res.status(404).json({ error: 'File not found' });
       }
 
-      const filePath = await downloadService.getDownloadFile(url);
+      if (job.status !== 'done') {
+        return res.status(409).json({ error: 'File is not ready yet' });
+      }
 
-      return res.download(filePath, async (err) => {
-        if (err) {
-          console.error('Error sending file:', err);
-          return res.status(500).send();
-        }
-
-        await downloadService.removeDownload(url);
-      });
+      // The browser downloads straight from R2; the file expires via the bucket lifecycle rule
+      const downloadUrl = await downloadService.getDownloadUrl(job);
+      return res.redirect(downloadUrl);
     } catch (error) {
       console.error('Error getting file:', error);
-      return res.status(404).json({ error: 'File not found' });
+      return res.status(500).json({ error: 'Failed to get file' });
     }
   }
-}; 
+};

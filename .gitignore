@@ -4,3 +4,5 @@ node_modules
 
 server2.js
 helpers.js
+# YouTube session cookies (on Vercel use YTDLP_COOKIES_BASE64)
+src/cookies.txt

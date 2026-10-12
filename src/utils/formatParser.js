@@ -1,68 +1,60 @@
-export function parseFormats(output) {
-  const lines = output.split('\n');
-  const formats = [];
+// Same units/precision yt-dlp uses in its `-F` table (e.g. "5.16MiB")
+function formatBytes(bytes) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes;
+  let unit = 0;
 
-  for (const line of lines) {
-    // Skip empty lines
-    if (!line.trim()) continue;
-
-    // Try to parse format line by checking if it starts with a format ID
-    // Format IDs are numbers or combinations of numbers+letters (like 251, 140, etc)
-    const formatMatch = line.match(/^([0-9a-z]+)\s+/i);
-
-    if (formatMatch) {
-      // Skip storyboard formats
-      if (formatMatch[1].startsWith('sb')) continue;
-
-      // Get the format ID from the match
-      const id = formatMatch[1];
-      if (id === "ID") continue
-
-      // Remove the ID from the start of the line and split the remaining content
-      const remainingLine = line.slice(id.length).trim();
-
-      // Extract extension (it's always the first part after ID)
-      const [ext, ...restParts] = remainingLine.split(/\s+/);
-
-      // Join the rest back together to handle "audio only" as a single unit
-      const rest = restParts.join(' ');
-
-      // Try to find filesize first - if not found, skip this format
-      const filesizeMatch = rest.match(/(\d+(\.\d+)?)(Ki|Mi|Gi)?B/);
-      if (!filesizeMatch) continue; // Skip formats without filesize
-
-      // Extract resolution and fps
-      let resolution = 'N/A';
-      let fps = null;
-
-      // Check for audio only format
-      if (rest.toLowerCase().includes('audio only')) {
-        resolution = 'audio only';
-      } else {
-        // Try to find resolution pattern (e.g., 1920x1080, 1280x720)
-        const resMatch = rest.match(/(\d+x\d+)/);
-        if (resMatch) {
-          resolution = resMatch[1];
-          // Try to find FPS separately
-          const fpsMatch = rest.match(/(\d+x\d+)\s+(\d+)/);
-          if (fpsMatch) {
-            fps = parseInt(fpsMatch[2]);
-          }
-        }
-      }
-
-      // Build format object with only the requested information
-      const format = {
-        code: id,
-        extension: ext,
-        resolution,
-        ...(fps !== null && { fps }), // Only include fps if it exists
-        filesize: filesizeMatch[0]
-      };
-
-      formats.push(format);
-    }
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
   }
 
-  return formats;
-} 
+  return `${value.toFixed(2)}${units[unit]}`;
+}
+
+// HLS/DASH manifests don't report a size; estimate it from bitrate (kbit/s) × duration
+function estimateBytes(format, duration) {
+  if (!format.tbr || !duration) return null;
+
+  return (format.tbr * 1000 / 8) * duration;
+}
+
+// Turns the `yt-dlp -J` info JSON into the list sent to the frontend
+export function parseFormats(info) {
+  const candidates = [];
+
+  for (const format of info.formats ?? []) {
+    const isAudioOnly = format.vcodec === 'none' && format.acodec !== 'none';
+    const isVideo = format.vcodec && format.vcodec !== 'none';
+
+    // Skip storyboards (images) and anything without audio or video
+    if (!isAudioOnly && !isVideo) continue;
+
+    // Skip DRC (dynamic range compressed) audio duplicates
+    if (format.format_id.endsWith('-drc')) continue;
+
+    const filesize = format.filesize ?? format.filesize_approx;
+    const estimated = filesize ? null : estimateBytes(format, info.duration);
+
+    candidates.push({
+      hasSize: Boolean(filesize),
+      format: {
+        code: format.format_id,
+        extension: format.ext,
+        resolution: isAudioOnly ? 'audio only' : (format.resolution ?? 'N/A'),
+        ...(isVideo && format.fps && { fps: Math.round(format.fps) }),
+        // "~" marks an estimate, same convention as yt-dlp's -F table
+        filesize: filesize
+          ? formatBytes(filesize)
+          : estimated ? `~${formatBytes(estimated)}` : 'N/A'
+      }
+    });
+  }
+
+  // Sites like YouTube list sized https formats plus unsized HLS duplicates: keep only the sized ones.
+  // Pure HLS sources (.m3u8 links) have no sized formats at all, so keep everything.
+  const sized = candidates.filter((candidate) => candidate.hasSize);
+  const selected = sized.length > 0 ? sized : candidates;
+
+  return selected.map((candidate) => candidate.format);
+}

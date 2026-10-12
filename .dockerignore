@@ -1,0 +1,6 @@
+node_modules
+.git
+_downloads
+npm-debug.log
+.env
+src/cookies.txt
