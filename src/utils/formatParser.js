@@ -1,68 +1,43 @@
-export function parseFormats(output) {
-  const lines = output.split('\n');
+// Same units/precision yt-dlp uses in its `-F` table (e.g. "5.16MiB")
+function formatBytes(bytes) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes;
+  let unit = 0;
+
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+
+  return `${value.toFixed(2)}${units[unit]}`;
+}
+
+// Turns the `yt-dlp -J` info JSON into the list sent to the frontend
+export function parseFormats(info) {
   const formats = [];
 
-  for (const line of lines) {
-    // Skip empty lines
-    if (!line.trim()) continue;
+  for (const format of info.formats ?? []) {
+    const isAudioOnly = format.vcodec === 'none' && format.acodec !== 'none';
+    const isVideo = format.vcodec && format.vcodec !== 'none';
 
-    // Try to parse format line by checking if it starts with a format ID
-    // Format IDs are numbers or combinations of numbers+letters (like 251, 140, etc)
-    const formatMatch = line.match(/^([0-9a-z]+)\s+/i);
+    // Skip storyboards (images) and anything without audio or video
+    if (!isAudioOnly && !isVideo) continue;
 
-    if (formatMatch) {
-      // Skip storyboard formats
-      if (formatMatch[1].startsWith('sb')) continue;
+    // Skip DRC (dynamic range compressed) audio duplicates
+    if (format.format_id.endsWith('-drc')) continue;
 
-      // Get the format ID from the match
-      const id = formatMatch[1];
-      if (id === "ID") continue
+    // Skip formats without a known size (mostly m3u8/HLS streams)
+    const filesize = format.filesize ?? format.filesize_approx;
+    if (!filesize) continue;
 
-      // Remove the ID from the start of the line and split the remaining content
-      const remainingLine = line.slice(id.length).trim();
-
-      // Extract extension (it's always the first part after ID)
-      const [ext, ...restParts] = remainingLine.split(/\s+/);
-
-      // Join the rest back together to handle "audio only" as a single unit
-      const rest = restParts.join(' ');
-
-      // Try to find filesize first - if not found, skip this format
-      const filesizeMatch = rest.match(/(\d+(\.\d+)?)(Ki|Mi|Gi)?B/);
-      if (!filesizeMatch) continue; // Skip formats without filesize
-
-      // Extract resolution and fps
-      let resolution = 'N/A';
-      let fps = null;
-
-      // Check for audio only format
-      if (rest.toLowerCase().includes('audio only')) {
-        resolution = 'audio only';
-      } else {
-        // Try to find resolution pattern (e.g., 1920x1080, 1280x720)
-        const resMatch = rest.match(/(\d+x\d+)/);
-        if (resMatch) {
-          resolution = resMatch[1];
-          // Try to find FPS separately
-          const fpsMatch = rest.match(/(\d+x\d+)\s+(\d+)/);
-          if (fpsMatch) {
-            fps = parseInt(fpsMatch[2]);
-          }
-        }
-      }
-
-      // Build format object with only the requested information
-      const format = {
-        code: id,
-        extension: ext,
-        resolution,
-        ...(fps !== null && { fps }), // Only include fps if it exists
-        filesize: filesizeMatch[0]
-      };
-
-      formats.push(format);
-    }
+    formats.push({
+      code: format.format_id,
+      extension: format.ext,
+      resolution: isAudioOnly ? 'audio only' : (format.resolution ?? 'N/A'),
+      ...(isVideo && format.fps && { fps: Math.round(format.fps) }),
+      filesize: formatBytes(filesize)
+    });
   }
 
   return formats;
-} 
+}
