@@ -29,7 +29,10 @@ Required env vars are listed in `.env.example` (Upstash Redis + Cloudflare R2). 
 The API is stateless so any Vercel instance can serve any request. Job state is in Redis and files are in R2; nothing is kept in process memory.
 
 Job-based download flow:
-1. `GET /api/formats?url=` runs `yt-dlp -J --no-playlist`. `utils/formatParser.js` maps the JSON `formats` array to `{ code, extension, resolution, fps?, filesize }`. It skips storyboards, `-drc` audio duplicates and formats without a size. The frontend depends on this shape.
+1. `GET /api/formats?url=` runs `yt-dlp -J --no-playlist`. The response is `{ title, thumbnail, formats }`, and `utils/formatParser.js` maps the yt-dlp JSON to `{ code, extension, resolution, fps?, filesize, vcodec?, acodec?, abr? }`. The frontend depends on this shape.
+   - Codecs are normalized (`avc1.*` → `h264`, `mp4a.*` → `aac`, …).
+   - `abr` (kbps) is set only on audio-only formats, `vcodec` only on video, and `acodec` only on formats that carry audio.
+   - The parser skips storyboards and `-drc` audio duplicates. Formats without a size are dropped too, unless the source has no sized formats at all (HLS); then they're kept with a `~` size estimated from bitrate × duration.
 2. `GET /api/download-with-code?url=&code=` validates the code against the formats, writes a `job:<uuid>` hash to Redis (24h TTL), and returns `{ jobId }`. The job runs in the background, wrapped in `waitUntil` from `@vercel/functions` (a no-op outside Vercel). Audio-only codes become mp3 (`-x`); video codes use `<code>+bestaudio/best` merged to mp4. `GET /api/download?url=&format=` is an older path that takes an extension from `config.supportedFormats`.
 3. Job lifecycle (`status`): `downloading` → `uploading` → `done`, or `error`.
    - Progress is scraped from yt-dlp stdout. It is capped at 99 until the R2 upload finishes, and Redis writes are throttled (`config.jobs.progressWriteIntervalMs`) to stay within Upstash's free tier.
