@@ -3,3 +3,4 @@ node_modules
 _downloads
 npm-debug.log
 .env
+src/cookies.txt
