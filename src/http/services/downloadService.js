@@ -102,6 +102,12 @@ class DownloadService {
     const isAudioOnly = selectedFormat.resolution === 'audio only';
     const extension = isAudioOnly ? 'mp3' : 'mp4';
 
+    // Formats that already carry audio (HLS variants, YouTube's 18) must not get "+bestaudio":
+    // with no separate audio track the selector falls back to "best" and ignores the chosen quality
+    const rawFormat = info.formats.find((format) => format.format_id === formatCode);
+    const hasAudio = rawFormat?.acodec && rawFormat.acodec !== 'none';
+    const videoSelector = hasAudio ? formatCode : `${formatCode}+bestaudio/${formatCode}`;
+
     const jobId = crypto.randomUUID();
     const outputPath = path.join(config.downloadsPath, `${jobId}.${extension}`);
 
@@ -111,7 +117,7 @@ class DownloadService {
       ...this.buildBaseArgs(cookieArgs),
       ...(isAudioOnly
         ? ['-x', '--audio-format', 'mp3', '-f', formatCode]
-        : ['--merge-output-format', 'mp4', '-f', `${formatCode}+bestaudio/best`]
+        : ['--merge-output-format', 'mp4', '-f', videoSelector]
       ),
       '-o',
       outputPath,
