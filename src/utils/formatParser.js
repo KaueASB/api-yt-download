@@ -12,6 +12,31 @@ function formatBytes(bytes) {
   return `${value.toFixed(2)}${units[unit]}`;
 }
 
+// yt-dlp reports raw codec strings (e.g. "avc1.4D401E", "vp09.00.10.08", "mp4a.40.2")
+const videoCodecs = [
+  [/^(avc[13]|h264)/i, 'h264'],
+  [/^(hev1|hvc1|h265|hevc)/i, 'h265'],
+  [/^(vp0?9)/i, 'vp9'],
+  [/^(vp0?8)/i, 'vp8'],
+  [/^(av01|av1)/i, 'av1']
+];
+
+const audioCodecs = [
+  [/^(mp4a|aac)/i, 'aac'],
+  [/^opus/i, 'opus'],
+  [/^vorbis/i, 'vorbis'],
+  [/^mp3/i, 'mp3'],
+  [/^(ac-3|ac3)/i, 'ac3'],
+  [/^(ec-3|eac3)/i, 'eac3']
+];
+
+function normalizeCodec(codec, table) {
+  if (!codec || codec === 'none') return null;
+
+  const match = table.find(([pattern]) => pattern.test(codec));
+  return match ? match[1] : codec.split('.')[0].toLowerCase();
+}
+
 // HLS/DASH manifests don't report a size; estimate it from bitrate (kbit/s) × duration
 function estimateBytes(format, duration) {
   if (!format.tbr || !duration) return null;
@@ -36,6 +61,10 @@ export function parseFormats(info) {
     const filesize = format.filesize ?? format.filesize_approx;
     const estimated = filesize ? null : estimateBytes(format, info.duration);
 
+    const vcodec = normalizeCodec(format.vcodec, videoCodecs);
+    const acodec = normalizeCodec(format.acodec, audioCodecs);
+    const abr = format.abr ?? format.tbr;
+
     candidates.push({
       hasSize: Boolean(filesize),
       format: {
@@ -46,7 +75,11 @@ export function parseFormats(info) {
         // "~" marks an estimate, same convention as yt-dlp's -F table
         filesize: filesize
           ? formatBytes(filesize)
-          : estimated ? `~${formatBytes(estimated)}` : 'N/A'
+          : estimated ? `~${formatBytes(estimated)}` : 'N/A',
+        // Optional fields: omitted when they don't apply (no vcodec on audio, no acodec on video-only)
+        ...(vcodec && { vcodec }),
+        ...(acodec && { acodec }),
+        ...(isAudioOnly && abr && { abr: Math.round(abr) })
       }
     });
   }

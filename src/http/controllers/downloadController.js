@@ -13,7 +13,11 @@ export const downloadController = {
 
       const info = await downloadService.getVideoInfo(videoUrl);
       const formats = parseFormats(info);
-      res.json({ formats });
+      res.json({
+        title: info.title ?? null,
+        thumbnail: info.thumbnail ?? null,
+        formats
+      });
     } catch (error) {
       console.error('Error getting formats:', error);
       res.status(500).json({ error: 'Failed to get available formats' });
