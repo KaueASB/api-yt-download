@@ -1,13 +1,7 @@
-import { Redis } from '@upstash/redis';
-
 import { config } from '../config/config.js';
+import { redis } from './redis.js';
 
 // Job state lives in Upstash Redis so any instance can answer /progress and /file
-const redis = new Redis({
-  url: config.redis.url,
-  token: config.redis.token
-});
-
 const jobKey = (jobId) => `job:${jobId}`;
 
 export const jobStore = {

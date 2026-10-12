@@ -18,6 +18,39 @@ function extractYtDlpError(stderr) {
   return (errors.length ? errors.join('\n') : lines.at(-1)) || 'Unknown yt-dlp error';
 }
 
+// mp3 with ID3 tags (title, artist, album, cover) so music apps don't fall back to the file name.
+// Many videos have no music metadata: artist falls back to the channel and album to the title
+const MP3_ARGS = [
+  '-x',
+  '--audio-format', 'mp3',
+  '--embed-metadata',
+  '--embed-thumbnail',
+  '--convert-thumbnails', 'jpg',
+  // Auto-generated YouTube Music channels are named "<artist> - Topic"
+  '--replace-in-metadata', 'artist,creator,channel,uploader', ' - Topic$', '',
+  '--parse-metadata', '%(album,title)s:%(meta_album)s',
+  // The video description is often huge (lyrics, credits, links) and only clutters the tags
+  '--parse-metadata', ':(?P<meta_description>)',
+  '--parse-metadata', ':(?P<meta_synopsis>)'
+];
+
+// Characters that are invalid in file names on some systems (and become "_" when saved)
+export function toFilename(title, extension) {
+  const name = (title ?? '').replace(/[\\/:*?"<>|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return `${name || 'download'}.${extension}`;
+}
+
+// Hooks let a caller (the Telegram bot) follow a job; a failing hook must never fail the job
+async function runHook(jobId, hook, ...args) {
+  if (!hook) return;
+
+  try {
+    await hook(...args);
+  } catch (error) {
+    console.error(`[JOB ${jobId}] hook failed:`, error);
+  }
+}
+
 class DownloadService {
   // yt-dlp rewrites the cookie file it is given, so each run gets its own copy
   // (keeps the exported cookies intact and avoids concurrent writes)
@@ -63,11 +96,7 @@ class DownloadService {
         if (code !== 0) {
           console.error(`Error getting formats: ${errorOutput}`);
 
-          reject(
-            new Error(
-              errorOutput || 'Failed to get available formats'
-            )
-          );
+          reject(new Error(extractYtDlpError(errorOutput)));
 
           return;
         }
@@ -81,7 +110,9 @@ class DownloadService {
     });
   }
 
-  async downloadWithFormatCode(videoUrl, formatCode) {
+  // hooks: { onUpdate({ status, progress }), onDone({ filePath, key, filename }), onError(error) }.
+  // onDone runs before the local file is deleted, so the caller can still read it
+  async downloadWithFormatCode(videoUrl, formatCode, hooks = {}) {
     if (!formatCode) {
       throw new Error('Format code is required');
     }
@@ -103,10 +134,13 @@ class DownloadService {
     const extension = isAudioOnly ? 'mp3' : 'mp4';
 
     // Formats that already carry audio (HLS variants, YouTube's 18) must not get "+bestaudio":
-    // with no separate audio track the selector falls back to "best" and ignores the chosen quality
+    // with no separate audio track the selector falls back to "best" and ignores the chosen quality.
+    // m4a (AAC) audio first: opus inside mp4 doesn't play on some phones (e.g. Telegram on iOS)
     const rawFormat = info.formats.find((format) => format.format_id === formatCode);
     const hasAudio = rawFormat?.acodec && rawFormat.acodec !== 'none';
-    const videoSelector = hasAudio ? formatCode : `${formatCode}+bestaudio/${formatCode}`;
+    const videoSelector = hasAudio
+      ? formatCode
+      : `${formatCode}+bestaudio[ext=m4a]/${formatCode}+bestaudio/${formatCode}`;
 
     const jobId = crypto.randomUUID();
     const outputPath = path.join(config.downloadsPath, `${jobId}.${extension}`);
@@ -116,7 +150,7 @@ class DownloadService {
     const commandArgs = [
       ...this.buildBaseArgs(cookieArgs),
       ...(isAudioOnly
-        ? ['-x', '--audio-format', 'mp3', '-f', formatCode]
+        ? [...MP3_ARGS, '-f', formatCode]
         : ['--merge-output-format', 'mp4', '-f', videoSelector]
       ),
       '-o',
@@ -126,8 +160,8 @@ class DownloadService {
 
     return this.startJob(jobId, commandArgs, outputPath, {
       url: videoUrl,
-      filename: info.title ? `${info.title}.${extension}` : `download.${extension}`
-    });
+      filename: toFilename(info.title, extension)
+    }, hooks);
   }
 
   async startDownload(videoUrl, format) {
@@ -168,8 +202,7 @@ class DownloadService {
 
   buildCommandArgs(isAudioFormat, outputPath, videoUrl, cookieArgs) {
     const audioArgs = [
-      '-x',
-      '--audio-format', 'mp3',
+      ...MP3_ARGS,
       '-o',
       outputPath
     ];
@@ -188,7 +221,7 @@ class DownloadService {
       : [...videoArgs, ...this.buildBaseArgs(cookieArgs), videoUrl];
   }
 
-  async startJob(jobId, commandArgs, outputPath, fields) {
+  async startJob(jobId, commandArgs, outputPath, fields, hooks = {}) {
     try {
       await jobStore.create(jobId, fields);
     } catch (error) {
@@ -197,43 +230,44 @@ class DownloadService {
     }
 
     // On Vercel this keeps the instance alive until the job ends (no-op elsewhere)
-    waitUntil(this.runJob(jobId, commandArgs, outputPath));
+    waitUntil(this.runJob(jobId, commandArgs, outputPath, hooks));
 
     return { message: 'Download started', jobId };
   }
 
   // Never rejects: failures are recorded on the job so /progress can report them
-  async runJob(jobId, commandArgs, outputPath) {
+  async runJob(jobId, commandArgs, outputPath, hooks = {}) {
     try {
-      const finalPath = await this.runYtDlp(jobId, commandArgs, outputPath);
+      const finalPath = await this.runYtDlp(jobId, commandArgs, outputPath, hooks);
 
       // Progress stays below 100 until the file is actually downloadable
       await jobStore.update(jobId, { status: 'uploading', progress: 99 });
+      await runHook(jobId, hooks.onUpdate, { status: 'uploading', progress: 99 });
 
       const key = `downloads/${path.basename(finalPath)}`;
       await storage.uploadFile(key, finalPath);
 
       const job = await jobStore.get(jobId);
-      await jobStore.update(jobId, {
-        status: 'done',
-        progress: 100,
-        key,
-        filename: job?.filename || path.basename(finalPath)
-      });
+      const filename = job?.filename || path.basename(finalPath);
+      await jobStore.update(jobId, { status: 'done', progress: 100, key, filename });
 
       console.log(`[JOB ${jobId}] completed`);
+
+      await runHook(jobId, hooks.onDone, { filePath: finalPath, key, filename });
     } catch (error) {
       console.error(`[JOB ${jobId}] failed:`, error.message);
 
       await jobStore
         .update(jobId, { status: 'error', progress: -1, error: error.message })
         .catch((err) => console.error(`[JOB ${jobId}] could not save error:`, err));
+
+      await runHook(jobId, hooks.onError, error);
     } finally {
       await this.removeLocalFiles(jobId);
     }
   }
 
-  runYtDlp(jobId, commandArgs, outputPath) {
+  runYtDlp(jobId, commandArgs, outputPath, hooks = {}) {
     return new Promise((resolve, reject) => {
       const ytDlpProcess = spawn('yt-dlp', commandArgs);
 
@@ -268,6 +302,8 @@ class DownloadService {
         pendingWrite = jobStore
           .update(jobId, { progress: value })
           .catch((err) => console.error(`[JOB ${jobId}] progress write failed:`, err));
+
+        runHook(jobId, hooks.onUpdate, { status: 'downloading', progress: value });
       });
 
       ytDlpProcess.stderr.on('data', (data) => {

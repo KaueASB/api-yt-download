@@ -500,3 +500,50 @@ Job ID → Redis (estado) → Storage externo (resultado) → Polling
   - O worker leria a fila do Redis e reaproveitaria quase todo o `downloadService`.
 - **Bloqueio do YouTube a IPs de datacenter:** se acontecer, ative os cookies (`YTDLP_USE_COOKIES=true`).
 - **Ainda não confirmado na Vercel:** o comportamento do `waitUntil` e o espaço disponível em `/tmp` dentro do container.
+
+---
+
+## Bot do Telegram
+
+O bot reaproveita o mesmo fluxo de jobs. A diferença é que, em vez do front consultando `/api/progress`, o próprio serviço avisa o bot por hooks, e o bot edita uma mensagem no chat.
+
+```text
+Você manda um link no chat
+↓
+Telegram → POST /telegram/webhook (header com o secret)
+↓
+API responde 200 na hora e segue em waitUntil
+↓
+yt-dlp -J → buildQualityOptions() → um botão por resolução + MP3
+↓
+Sessão salva no Redis (tg:session:<id>, 1h); os botões carregam só o id
+↓
+Você toca num botão → callback_query
+↓
+GETDEL na sessão (toque duplo não gera dois jobs)
+↓
+downloadWithFormatCode(url, code, hooks): o mesmo job do front
+↓
+onUpdate → edita a mensagem com a barra de progresso
+↓
+onDone (antes de apagar o arquivo local)
+↓
+≤ 50 MB: sendVideo / sendAudio direto do disco
+> 50 MB ou falha no upload: botão com a URL assinada do R2
+```
+
+| Peça | Responsabilidade |
+|---|---|
+| `telegramController` | Confere o `X-Telegram-Bot-Api-Secret-Token` e responde 200 rápido (o Telegram reenvia updates sem resposta) |
+| `telegramService` | Allowlist, botões, sessão no Redis, progresso e entrega |
+| `utils/qualityOptions.js` | Escolhe o melhor formato por altura (h264 primeiro) e estima o tamanho final com o áudio |
+| `lib/telegram.js` | Cliente mínimo da Bot API com `fetch`; o upload é streamado do disco |
+
+Configuração:
+
+1. Criar o bot no @BotFather e preencher `TELEGRAM_BOT_TOKEN` e `TELEGRAM_WEBHOOK_SECRET` (veja `.env.example`).
+2. Mandar `/start` para o bot. Ele responde com o seu ID, que vai em `TELEGRAM_ALLOWED_USER_IDS`.
+3. Em produção: `pnpm bot:webhook https://<url-da-api>`. Localmente: `pnpm bot:webhook` (sem URL, remove o webhook) e depois `pnpm bot:poll`.
+
+O limite de 50 MB é da Bot API pública. Passar disso exigiria rodar o servidor "Local Bot API" do Telegram (até 2 GB), que não cabe na Vercel.
+

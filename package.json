@@ -6,7 +6,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "node --watch --env-file .env --trace-warnings src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "bot:poll": "node --watch --env-file .env scripts/telegramPoll.js",
+    "bot:webhook": "node scripts/telegramWebhook.js"
   },
   "keywords": [],
   "author": "",
