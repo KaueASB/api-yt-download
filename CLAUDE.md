@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Express API (ESM, plain JavaScript) that wraps the `yt-dlp` CLI to list formats and download videos/audio. It is the backend for the Next.js frontend in `../web`. It is deployed to Vercel's container runtime via `Dockerfile.vercel`. `fluxo.md` (Portuguese) documents the original in-memory flow and is outdated on job state and file delivery.
+Express API (ESM, plain JavaScript) that wraps the `yt-dlp` CLI to list formats and download videos/audio. It is the backend for the Next.js frontend in `../web`. It is deployed to Vercel's container runtime via `Dockerfile.vercel`. `fluxo.md` (Portuguese) walks through the full request flow step by step.
 
 ## Commands
 

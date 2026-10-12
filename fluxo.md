@@ -1,22 +1,32 @@
 # Fluxo completo da API - yt-download
 
-Este documento descreve detalhadamente o fluxo atual da aplicação após a migração para o modelo baseado em jobs (`jobId`) e containers (`Dockerfile.vercel`).
+Este documento descreve o fluxo atual da aplicação: jobs identificados por `jobId`, com estado no **Upstash Redis** e arquivos no **Cloudflare R2**, rodando em container na Vercel (`Dockerfile.vercel`).
 
-O fluxo foi alterado em relação à implementação inicial.
+O fluxo mudou duas vezes em relação à implementação inicial.
 
-Antes:
+Primeira versão:
 
 ```text
 URL do vídeo → identificador do download
 ```
 
-Agora:
+Segunda versão:
 
 ```text
-jobId → identificador único do download
+jobId → Map em memória + arquivo em /tmp
 ```
 
-A API agora funciona como um pequeno sistema assíncrono de processamento de jobs.
+Versão atual:
+
+```text
+jobId → hash no Redis + arquivo no R2
+```
+
+### Por que mudou
+
+Na Vercel podem existir várias instâncias do container ao mesmo tempo, sem garantia de que as requisições caiam sempre na mesma. As instâncias também são desligadas depois de alguns minutos sem tráfego.
+
+Com o `Map` em memória, o `/progress` ou o `/file` podiam chegar a uma instância que nunca viu aquele `jobId`. Agora a API não guarda nada no processo, e qualquer instância responde qualquer requisição.
 
 ---
 
@@ -25,9 +35,9 @@ A API agora funciona como um pequeno sistema assíncrono de processamento de job
 ```text
 Frontend
 ↓
-GET /formats
+GET /api/formats
 ↓
-yt-dlp -F
+yt-dlp -J (JSON)
 ↓
 parseFormats()
 ↓
@@ -35,32 +45,39 @@ lista de formatos
 ↓
 Usuário escolhe formato
 ↓
-GET /download-with-code
+GET /api/download-with-code
 ↓
-Gera jobId
+Gera jobId + cria job no Redis
 ↓
-yt-dlp inicia download
+yt-dlp baixa em /tmp/downloads (dentro de waitUntil)
 ↓
-Arquivo salvo em /tmp/downloads
+Progresso gravado no Redis
 ↓
-Map armazena progresso
+Frontend consulta /api/progress (lê do Redis)
 ↓
-Frontend consulta /progress
+Upload do arquivo para o R2
 ↓
-Progress atualizado
+Job marcado como "done" (100%)
 ↓
-Download chega em 100%
+Frontend chama /api/file
 ↓
-Frontend chama /file
+Redirect para URL assinada do R2
 ↓
-Express envia arquivo
+Navegador baixa direto do R2
 ↓
-removeDownload()
-↓
-unlink()
-↓
-Job removido do Map
+Arquivo local já foi apagado; R2 e Redis expiram em 1 dia
 ```
+
+---
+
+## Peças da arquitetura
+
+| Peça | Responsabilidade |
+|---|---|
+| Vercel (container) | Roda a API, o yt-dlp e o ffmpeg, e faz o upload para o R2 |
+| Upstash Redis | Estado dos jobs (`status`, `progress`, `error`, `key`, `filename`) |
+| Cloudflare R2 | Arquivos prontos, entregues direto ao navegador |
+| `/tmp/downloads` | Rascunho só durante o job: trilhas separadas, merge do ffmpeg e upload |
 
 ---
 
@@ -69,7 +86,7 @@ Job removido do Map
 Exemplo:
 
 ```text
-https://www.youtube.com/watch?v=wW1cmqj5eFw
+https://www.youtube.com/watch?v=jNQXAC9IVRw
 ```
 
 Usuário clica:
@@ -78,13 +95,11 @@ Usuário clica:
 Get Download Options
 ```
 
-Nenhum download ocorre nesse momento.
-
-A aplicação apenas consulta os formatos disponíveis.
+Nenhum download ocorre nesse momento. A aplicação apenas consulta os formatos disponíveis.
 
 ---
 
-## Etapa 2 — Front chama /formats
+## Etapa 2 — Front chama /api/formats
 
 No frontend:
 
@@ -92,87 +107,58 @@ No frontend:
 const formats = await getVideoFormats(url);
 ```
 
-O service chama:
+Request:
 
 ```http
-GET /formats?url=https://youtube...
+GET /api/formats?url=https://youtube...
 ```
 
-Router:
+Router (montado em `/api` no `server.js`):
 
 ```js
-router.get("/formats", downloadController.getFormats);
+router.get('/formats', downloadController.getFormats);
 ```
 
 Controller:
 
 ```js
-const output = await downloadService.getFormats(videoUrl);
-const formats = parseFormats(output);
+const info = await downloadService.getVideoInfo(videoUrl);
+const formats = parseFormats(info);
 
 res.json({ formats });
 ```
 
 ---
 
-## Etapa 3 — yt-dlp consulta formatos
+## Etapa 3 — yt-dlp consulta formatos em JSON
 
 Dentro do service:
 
 ```js
-spawn("yt-dlp", ["--cookies", config.cookiesPath, "-F", videoUrl]);
+spawn('yt-dlp', [...cookieArgs, '-J', '--no-playlist', videoUrl]);
 ```
 
-Isso equivale a executar:
+Equivale a:
 
 ```bash
-yt-dlp -F "https://youtube..."
+yt-dlp -J --no-playlist "https://youtube..."
 ```
 
-O parâmetro:
+- `-J` devolve todas as informações do vídeo em **JSON**: título, duração e a lista `formats`, com codec, resolução, fps e tamanho de cada formato.
+- `--no-playlist` garante que uma URL com `&list=...` traga só o vídeo, e não a playlist inteira.
 
-```text
--F
-```
-
-significa:
-
-```text
-Listar formatos disponíveis
-```
-
-Exemplo de saída:
-
-```text
-ID EXT RESOLUTION FPS SIZE
-140 m4a audio only 4MB
-248 webm 1920x1080 30 50MB
-137 mp4 1920x1080 30 60MB
-```
+Antes era usado `-F`, que devolve uma tabela em texto e precisava ser interpretada com regex.
 
 ---
 
-## Etapa 4 — parseFormats limpa a saída
+## Etapa 4 — parseFormats filtra e formata
 
-A saída do yt-dlp é texto puro.
+O parser percorre `info.formats` e:
 
-O parser transforma:
-
-```text
-248 webm 1920x1080 30 50MB
-```
-
-em:
-
-```js
-{
- code: '248',
- extension: 'webm',
- resolution: '1920x1080',
- fps: 30,
- filesize: '50MB'
-}
-```
+- descarta storyboards (imagens, sem áudio nem vídeo);
+- descarta duplicatas de áudio `-drc`;
+- descarta formatos sem tamanho conhecido (em geral streams m3u8);
+- formata o tamanho igual ao yt-dlp (`5.16MiB`).
 
 Resultado:
 
@@ -182,19 +168,19 @@ Resultado:
     code: "140",
     extension: "m4a",
     resolution: "audio only",
-    filesize: "4MB",
+    filesize: "302.04KiB",
   },
   {
-    code: "248",
-    extension: "webm",
-    resolution: "1920x1080",
-    fps: 30,
-    filesize: "50MB",
+    code: "134",
+    extension: "mp4",
+    resolution: "320x240",
+    fps: 15,
+    filesize: "314.82KiB",
   },
 ];
 ```
 
-Isso é enviado ao frontend.
+O formato da resposta é o mesmo da versão anterior, então o frontend não precisou mudar.
 
 ---
 
@@ -203,8 +189,8 @@ Isso é enviado ao frontend.
 Exemplo:
 
 ```text
-MP4      1080p      [Download]
-WEBM     720p       [Download]
+MP4      720p       [Download]
+WEBM     360p       [Download]
 M4A      Audio      [Download]
 ```
 
@@ -233,48 +219,46 @@ const jobId = await startVideoDownload(url, formatId);
 Que chama:
 
 ```http
-GET /download-with-code?url=...&code=248
+GET /api/download-with-code?url=...&code=134
 ```
 
 ---
 
-## Etapa 7 — API cria um job
+## Etapa 7 — API cria o job no Redis
 
-Dentro do service:
+O service confere se o código existe na lista de formatos e gera o id:
 
 ```js
 const jobId = crypto.randomUUID();
 ```
 
-Exemplo:
+O job é criado no Redis como um hash com expiração de 24h:
+
+```js
+await redis.hset(`job:${jobId}`, {
+  status: 'downloading',
+  progress: 0,
+  url: videoUrl,
+  filename: 'Me at the zoo.mp4',
+});
+await redis.expire(`job:${jobId}`, 60 * 60 * 24);
+```
+
+Estado no Redis:
 
 ```text
-e4c90b4f-c915-41f0-a21f-94ecf8af5a73
+job:e4c90b4f-...  →  status=downloading  progress=0  url=...  filename=Me at the zoo.mp4
 ```
 
-O download é registrado:
+O processamento começa em segundo plano:
 
 ```js
-this.downloads.set(jobId, {
-  progress: 0,
-  outputPath,
-  process,
-});
+waitUntil(this.runJob(jobId, commandArgs, outputPath));
 ```
 
-Estado em memória:
+Na Vercel, o `waitUntil` mantém a instância viva até o job terminar. Fora da Vercel ele não faz nada, e o job roda normalmente.
 
-```js
-Map {
- 'e4c90...' => {
-   progress:0,
-   outputPath:'/tmp/downloads/video.mp4',
-   process:ChildProcess
- }
-}
-```
-
-Resposta enviada:
+Resposta enviada imediatamente:
 
 ```json
 {
@@ -285,50 +269,51 @@ Resposta enviada:
 
 ---
 
-## Etapa 8 — yt-dlp inicia download real
+## Etapa 8 — yt-dlp baixa em /tmp
 
-Comando equivalente:
+Comando equivalente, para um código de vídeo:
 
 ```bash
 yt-dlp \
--f 248 \
--o /tmp/downloads/video.mp4 \
+-f 134+bestaudio/best \
+--merge-output-format mp4 \
+-o /tmp/downloads/<jobId>.mp4 \
 https://youtube...
 ```
 
-Saída:
+Para um código de áudio, o yt-dlp converte para mp3 (`-x --audio-format mp3`).
 
-```text
-[download] 12.5%
-[download] 35.2%
-[download] 67.8%
-```
+O `/tmp/downloads` é só rascunho. Ali o yt-dlp baixa vídeo e áudio separados, e o ffmpeg junta os dois. Todos os arquivos do job começam com o `jobId`, o que facilita apagá-los no final.
+
+### Cookies (opcional)
+
+Com `YTDLP_USE_COOKIES=true`, os cookies vêm de `YTDLP_COOKIES_BASE64` (na Vercel) ou de `src/cookies.txt` (local).
+
+Cada execução recebe uma **cópia temporária** (`<id>.cookies.txt`). O yt-dlp reescreve o arquivo de cookies que recebe, e isso estragava os cookies exportados.
 
 ---
 
 ## Etapa 9 — Captura do progresso
 
-O service escuta:
+O service escuta a saída do yt-dlp:
 
 ```js
-process.stdout.on("data");
+ytDlpProcess.stdout.on('data', ...);
 ```
 
 Captura:
 
 ```js
-const progressMatch = data.toString().match(/(\d+\.\d+)%/);
+const match = text.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
 ```
 
-Atualiza:
+E grava no Redis, **no máximo a cada 2 segundos** para caber no plano gratuito do Upstash:
 
 ```js
-this.downloads.set(jobId, {
-  progress: 35.2,
-  outputPath,
-  process,
-});
+jobStore.update(jobId, { progress: 35.2 });
 ```
+
+O progresso fica limitado a 99 até o arquivo estar no R2.
 
 ---
 
@@ -345,24 +330,35 @@ setInterval(async () => {
 Request:
 
 ```http
-GET /progress?jobId=e4c90...
+GET /api/progress?jobId=e4c90...
 ```
 
-Controller:
+Controller, que lê do Redis e funciona em qualquer instância:
 
 ```js
-const progress = downloadService.getDownloadProgress(jobId);
+const job = await downloadService.getJob(jobId);
 
-res.json({ progress });
+res.json({ progress: job.progress, status: job.status });
 ```
 
 Resposta:
 
 ```json
 {
-  "progress": 35.2
+  "progress": 35.2,
+  "status": "downloading"
 }
 ```
+
+Respostas possíveis:
+
+| Situação | HTTP | Corpo |
+|---|---|---|
+| Baixando | 200 | `{ "progress": 35.2, "status": "downloading" }` |
+| Enviando para o R2 | 200 | `{ "progress": 99, "status": "uploading" }` |
+| Pronto | 200 | `{ "progress": 100, "status": "done" }` |
+| Falhou | 500 | `{ "progress": -1, "error": "ERROR: [youtube] ...: Private video" }` |
+| Job não existe | 404 | `{ "error": "Download not found" }` |
 
 ---
 
@@ -374,44 +370,36 @@ Exemplo visual:
 ███████░░░░░░░░░ 35%
 ```
 
-Conforme o backend responde:
-
-```json
-{
-  "progress": 50
-}
-```
-
-```json
-{
-  "progress": 70
-}
-```
-
-```json
-{
-  "progress": 95
-}
-```
-
 ---
 
-## Etapa 12 — Download finalizado
+## Etapa 12 — Upload para o R2
 
-Quando o processo termina:
+Quando o yt-dlp termina com sucesso:
 
 ```js
-process.on("close");
+await jobStore.update(jobId, { status: 'uploading', progress: 99 });
+
+await storage.uploadFile(`downloads/${jobId}.mp4`, finalPath);
+
+await jobStore.update(jobId, {
+  status: 'done',
+  progress: 100,
+  key: `downloads/${jobId}.mp4`,
+});
 ```
 
-Atualiza:
+O upload é multipart e lê o arquivo do disco em streaming, então vídeos grandes nunca ficam inteiros na memória.
+
+Em seguida, todos os arquivos locais do job são apagados, tanto no sucesso quanto na falha:
 
 ```js
-this.downloads.set(jobId, {
-  progress: 100,
-  outputPath,
-  process: null,
-});
+await this.removeLocalFiles(jobId);
+```
+
+Se algo falhar (yt-dlp, upload, disco), o erro real fica salvo no job:
+
+```js
+await jobStore.update(jobId, { status: 'error', progress: -1, error: error.message });
 ```
 
 ---
@@ -422,7 +410,8 @@ Recebe:
 
 ```json
 {
-  "progress": 100
+  "progress": 100,
+  "status": "done"
 }
 ```
 
@@ -432,93 +421,82 @@ Executa:
 downloadFile(jobId);
 ```
 
+Que abre o `/api/file` num iframe escondido.
+
 ---
 
-## Etapa 14 — API envia arquivo
+## Etapa 14 — API redireciona para o R2
 
-Frontend:
+Request:
 
 ```http
-GET /file?jobId=e4c90...
+GET /api/file?jobId=e4c90...
 ```
 
 Controller:
 
 ```js
-const filePath = await downloadService.getDownloadFile(jobId);
+const downloadUrl = await downloadService.getDownloadUrl(job);
 
-res.download(filePath);
+res.redirect(downloadUrl);
 ```
 
-Express envia:
+A API gera uma **URL assinada** do R2, válida por 1 hora, que já define o nome do arquivo baixado:
 
 ```text
-/tmp/downloads/video.mp4
+Content-Disposition: attachment; filename="Me at the zoo.mp4"
 ```
 
-para o navegador.
+O navegador baixa o arquivo **direto do R2**. A Vercel não transfere o vídeo, o que evita o limite de 4,5 MB por resposta, e o egress do R2 é gratuito.
+
+Se o job ainda não terminou, a resposta é `409 File is not ready yet`.
 
 ---
 
 ## Etapa 15 — Limpeza automática
 
-Após o envio:
+Não existe mais rotina de limpeza no código:
 
-```js
-await downloadService.removeDownload(jobId);
-```
+| O quê | Quando some |
+|---|---|
+| Arquivos em `/tmp/downloads` | No fim de cada job, inclusive em falha |
+| Job no Redis | TTL de 24h |
+| Arquivo no R2 | Regra de ciclo de vida do bucket: prefixo `downloads/`, apagar após 1 dia |
 
-Executa:
-
-```js
-await unlink(download.outputPath);
-this.downloads.delete(jobId);
-```
-
-Estado final:
-
-```js
-Map {}
-```
-
-Arquivo removido:
-
-```text
-/tmp/downloads/video.mp4
-```
+A regra do R2 precisa ser configurada no painel da Cloudflare. Sem ela, os arquivos nunca são apagados.
 
 ---
 
 ### Resumo arquitetural
 
-A aplicação atualmente funciona como:
-
 ```text
 Frontend
 ↓
-API
+API na Vercel (stateless)
 ↓
-yt-dlp
+yt-dlp + ffmpeg em /tmp (rascunho)
 ↓
-/tmp/downloads
+Upload para o R2
 ↓
-Map em memória
+Estado no Upstash Redis
 ↓
-Polling de progresso
+Polling de progresso (qualquer instância)
 ↓
-Download final
+Redirect para URL assinada do R2
 ↓
-Limpeza automática
+Expiração automática (Redis TTL + lifecycle do R2)
 ```
 
-Embora seja uma implementação simples para um projeto pessoal, a arquitetura se aproxima de sistemas de fila assíncrona usados em produção:
+A arquitetura segue o modelo de fila assíncrona, com o estado fora do processo:
 
 ```text
-BullMQ
-Redis Jobs
-Workers
-Queues
-Background Processing
+Job ID → Redis (estado) → Storage externo (resultado) → Polling
 ```
 
-A diferença é que atualmente os jobs ficam apenas em memória (`Map`) e não em armazenamento persistente.
+### Limitações conhecidas
+
+- **Tempo máximo na Vercel:** o job inteiro (download e upload) precisa terminar dentro do limite da função, que é 300s no Hobby e 800s no Pro.
+  - Se isso virar problema, o próximo passo é mover o download para um worker fora da Vercel.
+  - O worker leria a fila do Redis e reaproveitaria quase todo o `downloadService`.
+- **Bloqueio do YouTube a IPs de datacenter:** se acontecer, ative os cookies (`YTDLP_USE_COOKIES=true`).
+- **Ainda não confirmado na Vercel:** o comportamento do `waitUntil` e o espaço disponível em `/tmp` dentro do container.
