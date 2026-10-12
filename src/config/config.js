@@ -57,6 +57,24 @@ export const config = {
     downloadUrlExpiresSeconds: 60 * 60
   },
 
+  // Telegram bot (optional): enabled only when TELEGRAM_BOT_TOKEN is set
+  telegram: process.env.TELEGRAM_BOT_TOKEN
+    ? {
+        botToken: process.env.TELEGRAM_BOT_TOKEN,
+        // Telegram sends it in X-Telegram-Bot-Api-Secret-Token on every webhook call
+        webhookSecret: requireEnv('TELEGRAM_WEBHOOK_SECRET'),
+        // Everyone else is ignored; empty means nobody (the bot still answers /start with the user's id)
+        allowedUserIds: (process.env.TELEGRAM_ALLOWED_USER_IDS ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        // Bot API upload limit; bigger files are sent as an R2 link instead
+        maxUploadBytes: 50 * 1024 * 1024,
+        // How long the quality buttons keep working after a link is sent
+        sessionTtlSeconds: 60 * 60
+      }
+    : null,
+
   supportedFormats: {
     video: ['webm', 'mp4', 'mkv'],
     audio: ['opus', 'aac', 'mp3', 'm4a', 'wav']
@@ -81,6 +99,10 @@ if (config.useCookies) {
   }
 }
 
+if (config.telegram && !/^[A-Za-z0-9_-]{1,256}$/.test(config.telegram.webhookSecret)) {
+  throw new Error('TELEGRAM_WEBHOOK_SECRET may only contain A-Z, a-z, 0-9, _ and - (max 256 chars)');
+}
+
 console.log('Configuration:', {
   port: config.port,
   downloadsPath: config.downloadsPath,
@@ -89,5 +111,8 @@ console.log('Configuration:', {
     ? 'none'
     : config.cookiesContent !== null ? 'YTDLP_COOKIES_BASE64' : config.cookiesPath,
   r2Bucket: config.r2.bucket,
+  telegramBot: config.telegram
+    ? `on (${config.telegram.allowedUserIds.length} allowed users)`
+    : 'off',
   downloadOptions: config.downloadOptions
 });

@@ -14,13 +14,15 @@ Package manager is pnpm (`pnpm-lock.yaml`).
 pnpm install
 pnpm dev     # node --watch with .env loaded
 pnpm start   # production entry: node src/server.js
+pnpm bot:poll                      # run the Telegram bot locally by long polling (no public URL needed)
+pnpm bot:webhook https://<api-url> # register the webhook; with no URL it deletes it (required before bot:poll)
 ```
 
 There are no tests, linter, or build step.
 
 Runtime requirements: `yt-dlp` must be on `PATH` (no self-install logic), and `ffmpeg` for merging video+audio and mp3 extraction. `Dockerfile.vercel` installs both on `node:24-slim`.
 
-Required env vars are listed in `.env.example` (Upstash Redis + Cloudflare R2). `config.js` throws at startup if any is missing. To run locally without real accounts, use any S3-compatible server via `R2_ENDPOINT` (Adobe S3Mock works; the `minio/minio` Docker Hub image is gone) and `hiett/serverless-redis-http` in front of a Redis container to emulate Upstash's REST API.
+Required env vars are listed in `.env.example` (Upstash Redis + Cloudflare R2). `config.js` throws at startup if any is missing. The Telegram bot is optional and only turns on when `TELEGRAM_BOT_TOKEN` is set. To run locally without real accounts, use any S3-compatible server via `R2_ENDPOINT` (Adobe S3Mock works; the `minio/minio` Docker Hub image is gone) and `hiett/serverless-redis-http` in front of a Redis container to emulate Upstash's REST API.
 
 ## Architecture
 
@@ -43,6 +45,11 @@ Key points:
 - Local files exist only during a job, in `os.tmpdir()/downloads`. They are named `<jobId>.*` and deleted (including leftovers) when the job ends. The final path comes from yt-dlp's `--print after_move:FILEPATH:%(filepath)s`, because yt-dlp can change the extension.
 - Nothing deletes R2 objects in code. The bucket needs a lifecycle rule (prefix `downloads/`, 1 day).
 - Vercel limits apply to the whole job: max duration is 300s on Hobby and 800s on Pro. Responses over 4.5 MB fail, which is why files are served from R2. The container listens on `PORT`, and Vercel defaults it to 80.
+- Telegram bot (`POST /telegram/webhook`, outside `/api`, mounted only when `config.telegram` is set). It goes `telegramController` (checks the `X-Telegram-Bot-Api-Secret-Token` header, answers 200 right away, then works in `waitUntil`) → `http/services/telegramService.js`. `lib/telegram.js` is a minimal `fetch` Bot API client.
+  - A link gets one button per resolution from `utils/qualityOptions.js` (h264 preferred, size includes the merged audio) plus MP3. `callback_data` is capped at 64 bytes, so buttons carry `dl:<sessionId>:<index>` and the session sits in Redis (`tg:session:<id>`, 1h). It is read with `GETDEL`, so a double tap starts one job.
+  - The bot follows the job through the optional `hooks` of `downloadWithFormatCode` (`onUpdate`, `onDone`, `onError`). `onDone` runs before local files are deleted, so files ≤ 50 MB (the Bot API upload limit) are uploaded to the chat from disk. Bigger files, or a failed upload, get the R2 presigned link instead. Hook errors never fail the job.
+  - Only ids in `TELEGRAM_ALLOWED_USER_IDS` are served. Others get a reply only to `/start`, which tells them their id.
+  - The Telegram upload counts toward the Vercel max duration too.
 - Cookies are opt-in (`YTDLP_USE_COOKIES=true`). Expired or rotated cookies make YouTube return 403 on larger formats, while no cookies works locally.
   - The source is `YTDLP_COOKIES_BASE64` (used on Vercel) or else `src/cookies.txt`. The file is resolved from `process.cwd()` and is git- and docker-ignored because it holds a live YouTube session. `config.js` fails at startup if the chosen source is missing or doesn't decode to a Netscape cookie file.
   - yt-dlp rewrites any cookie file it is given, so each run writes its own `<id>.cookies.txt` in the temp dir. Never pass `config.cookiesPath` to yt-dlp directly.

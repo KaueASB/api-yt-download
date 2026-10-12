@@ -5,6 +5,7 @@ import { mkdir } from "node:fs/promises";
 
 import { config } from "./config/config.js";
 import downloadRoutes from "./http/routes/downloadRoutes.js";
+import telegramRoutes from "./http/routes/telegramRoutes.js";
 
 async function initializeServer() {
   const app = express();
@@ -15,6 +16,10 @@ async function initializeServer() {
 
   // Routes
   app.use('/api', downloadRoutes);
+
+  if (config.telegram) {
+    app.use('/telegram', telegramRoutes);
+  }
 
   // Health check endpoint
   app.get('/health', (_req, res) => {
